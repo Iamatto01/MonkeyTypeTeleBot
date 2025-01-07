@@ -3,8 +3,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # API keys
-MONKEYTYPE_API_KEY = "Njc3YmQxYzk5ODk0OTY0MjkzMDM4N2MxLk9mVlJIeFR5WmtMT1d0NGRPbkpmUjI3SXIybThvUzBl"
-TELEGRAM_API_KEY = "6768102658:AAG1Sc2BFQs4Hz9MLkJbGpEcAPyyuJMaOII"
+MONKEYTYPE_API_KEY = ""
+TELEGRAM_API_KEY = ""
 
 # Base Monkeytype API URL
 MONKEYTYPE_API_BASE = "https://api.monkeytype.com"
