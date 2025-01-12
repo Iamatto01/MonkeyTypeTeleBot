@@ -1,18 +1,16 @@
 import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import json
 
-# API keys
-MONKEYTYPE_API_KEY = "YOUR_MONKEYTYPE_API_KEY"
-TELEGRAM_API_KEY = "YOUR_TELEGRAM_API_KEY"
-
-# Base Monkeytype API URL
-MONKEYTYPE_API_BASE = "https://api.monkeytype.com"
+# Temporary storage for API keys (use a real database in production)
+user_api_keys = {}
 
 # Utility function to fetch data from Monkeytype API
-def fetch_from_api(endpoint: str, headers=None, params=None):
+def fetch_from_api(endpoint: str, api_key: str, params=None):
     try:
-        url = f"{MONKEYTYPE_API_BASE}{endpoint}"
+        url = f"https://api.monkeytype.com{endpoint}"
+        headers = {"Authorization": f"ApeKey {api_key}"}
         response = requests.get(url, headers=headers, params=params)
         return response.status_code, response.json()
     except Exception as e:
@@ -22,18 +20,39 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
     welcome_message = (
         "Welcome to the Monkeytype Tracker Bot! 🎉\n\n"
+        "Set your Monkeytype API key first with /setapikey.\n\n"
         "Available commands:\n"
         "/recentresult - View your most recent typing test\n"
         "/checkpersonalbest - View your personal best stats\n"
         "/typingstats - View global typing stats\n"
+        "/news - View the latest public service announcements\n"
+        "/histogram - View a histogram of typing speed distribution\n"
     )
     await update.message.reply_text(welcome_message)
 
+async def set_api_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save the user's Monkeytype API key."""
+    if not context.args:
+        await update.message.reply_text("Please provide your Monkeytype API key. Usage: /setapikey <YOUR_API_KEY>")
+        return
+
+    api_key = context.args[0]
+    user_id = update.effective_user.id
+    user_api_keys[user_id] = api_key
+
+    await update.message.reply_text("Your API key has been saved! ✅ Now you can use other commands.")
+
 async def recent_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Fetch and display the user's most recent result."""
+    user_id = update.effective_user.id
+    api_key = user_api_keys.get(user_id)
+
+    if not api_key:
+        await update.message.reply_text("You need to set your API key first with /setapikey.")
+        return
+
     endpoint = "/results/last"
-    headers = {"Authorization": f"ApeKey {MONKEYTYPE_API_KEY}"}
-    status_code, response_data = fetch_from_api(endpoint, headers=headers)
+    status_code, response_data = fetch_from_api(endpoint, api_key)
 
     if status_code == 200:
         data = response_data.get("data", {})
@@ -52,15 +71,20 @@ async def recent_result(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Failed to fetch recent result. Status: {status_code}")
 
 async def check_personal_best(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch and display the user's personal bests for different durations and word counts."""
+    """Fetch and display the user's personal bests."""
+    user_id = update.effective_user.id
+    api_key = user_api_keys.get(user_id)
+
+    if not api_key:
+        await update.message.reply_text("You need to set your API key first with /setapikey.")
+        return
+
     endpoint = "/results"
-    headers = {"Authorization": f"ApeKey {MONKEYTYPE_API_KEY}"}
-    params = {"limit": 1000}  # Fetch a larger dataset to analyze personal bests
-    status_code, response_data = fetch_from_api(endpoint, headers=headers, params=params)
+    params = {"limit": 1000}
+    status_code, response_data = fetch_from_api(endpoint, api_key, params)
 
     if status_code == 200:
         results = response_data.get("data", [])
-        # Initialize personal bests for each category
         categories = {
             "15 seconds": None,
             "30 seconds": None,
@@ -72,7 +96,6 @@ async def check_personal_best(update: Update, context: ContextTypes.DEFAULT_TYPE
             "100 words": None,
         }
 
-        # Analyze results to find the highest WPM for each category
         for result in results:
             mode = result.get("mode")
             duration = result.get("testDuration")
@@ -98,10 +121,17 @@ async def check_personal_best(update: Update, context: ContextTypes.DEFAULT_TYPE
                 elif word_count == 100 and (categories["100 words"] is None or wpm > categories["100 words"]):
                     categories["100 words"] = wpm
 
-        # Create the message with personal bests
+        valid_wpm_values = [wpm for wpm in categories.values() if wpm is not None]
+        average_wpm = sum(valid_wpm_values) / len(valid_wpm_values) if valid_wpm_values else None
+
         pb_message = "🏆 *Your Personal Bests* 🏆\n\n"
         for category, wpm in categories.items():
             pb_message += f" - {category}: {wpm if wpm else 'No data available'} WPM\n"
+        
+        if average_wpm is not None:
+            pb_message += f"\n📊 *Average WPM*: {average_wpm:.2f}"
+        else:
+            pb_message += "\n📊 *Average WPM*: No data available"
 
         await update.message.reply_text(pb_message, parse_mode="Markdown")
     elif status_code == 401:
@@ -109,33 +139,48 @@ async def check_personal_best(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         await update.message.reply_text(f"Failed to fetch personal bests. Status: {status_code}")
 
-async def typing_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch and display global typing stats."""
-    endpoint = "/public/typingStats"
-    status_code, response_data = fetch_from_api(endpoint)
+async def fetch_news(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch and display the latest public service announcements."""
+    endpoint = "/psa"
+    status_code, response_data = fetch_from_api(endpoint, "")
 
     if status_code == 200:
-        data = response_data.get("data", {})
-        stats_message = (
-            "🌎 *Global Typing Stats* 🌎\n\n"
-            f" - Total Time Typed: {data.get('timeTyping')} hours\n"
-            f" - Tests Completed: {data.get('testsCompleted')} tests\n"
-        )
-        await update.message.reply_text(stats_message, parse_mode="Markdown")
+        announcements = response_data.get("data", [])
+        if announcements:
+            message = "📰 *Latest Public Service Announcements* 📰\n\n"
+            for announcement in announcements[:5]:
+                message += f" - {announcement.get('message', 'No message available')}\n"
+            await update.message.reply_text(message, parse_mode="Markdown")
+        else:
+            await update.message.reply_text("No public service announcements available.")
     else:
-        await update.message.reply_text(f"Failed to fetch typing stats. Status: {status_code}")
+        await update.message.reply_text(f"Failed to fetch announcements. Status: {status_code}")
+
+async def fetch_histogram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fetch and display typing speed histogram."""
+    endpoint = "/speed/histogram"
+    status_code, response_data = fetch_from_api(endpoint, "")
+
+    if status_code == 200:
+        histogram_data = response_data.get("data", [])
+        message = "📊 *Typing Speed Distribution* 📊\n\n"
+        for entry in histogram_data:
+            speed_range = entry.get("speedRange")
+            count = entry.get("count")
+            message += f" - {speed_range} WPM: {count} entries\n"
+        await update.message.reply_text(message, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(f"Failed to fetch histogram. Status: {status_code}")
 
 def main():
-    # Create the Telegram bot application
-    application = ApplicationBuilder().token(TELEGRAM_API_KEY).build()
-
-    # Add command handlers
+    # Replace 'YOUR_TELEGRAM_API_KEY' with your actual bot token
+    application = ApplicationBuilder().token("").build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("setapikey", set_api_key))
     application.add_handler(CommandHandler("recentresult", recent_result))
     application.add_handler(CommandHandler("checkpersonalbest", check_personal_best))
-    application.add_handler(CommandHandler("typingstats", typing_stats))
-
-    # Start the bot
+    application.add_handler(CommandHandler("news", fetch_news))
+    application.add_handler(CommandHandler("histogram", fetch_histogram))
     application.run_polling()
 
 if __name__ == "__main__":
