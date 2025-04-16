@@ -1,3 +1,5 @@
+need to tdo this manual
+
 # MonkeyTypeTeleBot
 
 
