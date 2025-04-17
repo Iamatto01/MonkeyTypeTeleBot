@@ -1,4 +1,4 @@
-need to tdo this manual
+i need to tdo this manual
 
 # MonkeyTypeTeleBot
 
